@@ -1,0 +1,52 @@
+name: dynacalorie_app
+description: DynaCalorie AI - Adaptive Metabolic Calorie Tracker
+
+publish_to: 'none'
+
+version: 2.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP client
+  http: ^1.2.1
+
+  # State management
+  provider: ^6.1.2
+
+  # Persist auth token locally
+  shared_preferences: ^2.2.3
+
+  # Vector icon assets (optional)
+  flutter_svg: ^2.0.10
+
+  # Smooth animations
+  flutter_animate: ^4.5.0
+
+  webview_flutter: ^4.8.0
+  fl_chart: ^0.68.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.6
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
+
+flutter_native_splash:
+  color: "#1A1A2E"
+  image: "assets/icon/app_icon.png"
+  android: true
+  ios: true
+
+flutter:
+  uses-material-design: true
