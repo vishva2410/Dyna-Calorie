@@ -4,7 +4,7 @@ models.py — Pydantic v2 request/response schemas for all API endpoints.
 from __future__ import annotations
 import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -12,12 +12,12 @@ from pydantic import BaseModel, Field, EmailStr
 # ══════════════════════════════════════════════════════════════════════════════
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str = Field(min_length=8)
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 

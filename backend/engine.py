@@ -68,6 +68,10 @@ def run_recalibration(
         # Lost less than expected → TDEE was overestimated, decrease it
         new_tdee = current_tdee - 100.0
         direction = "decrease"
+    else:
+        # Within expected variance — no adjustment needed
+        new_tdee = current_tdee
+        direction = "none"
 
     return {
         "new_tdee_kcal": round(new_tdee, 2),

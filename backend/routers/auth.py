@@ -1,13 +1,15 @@
 """
-routers/auth.py — Registration and Login endpoints.
+routers/auth.py — Registration, Login, and Onboarding endpoints.
 
-Wraps Supabase Auth for user sign-up and sign-in.
-On registration, also inserts the metabolic profile into the `users` table
-after an onboarding form submission (separate `POST /users/onboard` endpoint).
+Uses local SQLite + bcrypt auth instead of Supabase.
 """
 from fastapi import APIRouter, HTTPException, status
 from backend.models import RegisterRequest, LoginRequest, AuthResponse, OnboardingRequest
-from backend.database import supabase_client, supabase_admin
+from backend.database_local import (
+    create_auth_user, get_auth_user_by_email, insert_user,
+    insert_weekly_budget, upsert_weight_log, new_id,
+)
+from backend.auth_utils import hash_password, verify_password, create_access_token
 from backend.engine import compute_full_metabolic_profile, calculate_body_fat_navy
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -15,66 +17,38 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest) -> AuthResponse:
-    """
-    Creates a new Supabase Auth user.
-    Returns the JWT access token for immediate login after registration.
-    """
+    """Creates a new user with local auth."""
     try:
-        response = supabase_client.auth.sign_up({
-            "email": payload.email,
-            "password": payload.password,
-        })
-    except Exception as exc:
+        pw_hash = hash_password(payload.password)
+        user_id = create_auth_user(payload.email, pw_hash)
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Registration failed: {str(exc)}",
+            detail=str(exc),
         )
 
-    if not response.session:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Registration succeeded but no session was returned. Check email confirmation settings.",
-        )
-
-    return AuthResponse(
-        access_token=response.session.access_token,
-        user_id=response.user.id,
-    )
+    token = create_access_token(user_id)
+    return AuthResponse(access_token=token, user_id=user_id)
 
 
 @router.post("/login", response_model=AuthResponse)
 async def login(payload: LoginRequest) -> AuthResponse:
-    """
-    Authenticates a user via Supabase Auth email/password.
-    Returns a JWT access token for subsequent authenticated requests.
-    """
-    try:
-        response = supabase_client.auth.sign_in_with_password({
-            "email": payload.email,
-            "password": payload.password,
-        })
-    except Exception as exc:
+    """Authenticates a user via email/password."""
+    user = get_auth_user_by_email(payload.email)
+    if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Login failed: {str(exc)}",
+            detail="Invalid email or password.",
         )
 
-    if not response.session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials.",
-        )
-
-    return AuthResponse(
-        access_token=response.session.access_token,
-        user_id=response.user.id,
-    )
+    token = create_access_token(user["id"])
+    return AuthResponse(access_token=token, user_id=user["id"])
 
 
 @router.post("/onboard", status_code=status.HTTP_201_CREATED)
 async def onboard(payload: OnboardingRequest) -> dict:
     """
-    Called from the Flutter onboarding screen after registration.
+    Called from the onboarding screen after registration.
     Inserts a metabolic profile row for the user and calculates their initial
     TDEE + weekly budget, then seeds the first weekly_budgets row.
     """
@@ -106,7 +80,7 @@ async def onboard(payload: OnboardingRequest) -> dict:
 
     # ── 2. Insert user row ─────────────────────────────────────────────────
     try:
-        supabase_admin.table("users").insert({
+        insert_user({
             "id":             payload.user_id,
             "age":            payload.age,
             "gender":         payload.gender,
@@ -120,7 +94,7 @@ async def onboard(payload: OnboardingRequest) -> dict:
             "goal":           payload.goal,
             "target_rate":    payload.target_rate,
             "current_tdee":   profile["tdee_kcal"],
-        }).execute()
+        })
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -130,18 +104,17 @@ async def onboard(payload: OnboardingRequest) -> dict:
     # ── 3. Seed the first weekly budget (current ISO week) ─────────────────
     from datetime import date, timedelta
     today = date.today()
-    # Start of ISO week (Monday)
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
 
     try:
-        supabase_admin.table("weekly_budgets").insert({
+        insert_weekly_budget({
             "user_id":          payload.user_id,
             "start_date":       str(week_start),
             "end_date":         str(week_end),
             "total_budget":     profile["weekly_budget_kcal"],
             "remaining_budget": profile["weekly_budget_kcal"],
-        }).execute()
+        })
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -150,13 +123,9 @@ async def onboard(payload: OnboardingRequest) -> dict:
 
     # ── 4. Also store initial weight log ───────────────────────────────────
     try:
-        supabase_admin.table("weight_logs").insert({
-            "user_id":   payload.user_id,
-            "date":      str(today),
-            "weight_kg": payload.weight_kg,
-        }).execute()
+        upsert_weight_log(payload.user_id, str(today), payload.weight_kg)
     except Exception:
-        pass  # Non-fatal: weight log might fail on duplicate
+        pass  # Non-fatal
 
     return {
         "message": "Onboarding complete.",
